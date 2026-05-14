@@ -1,0 +1,29 @@
+# Jupyter
+.ipynb_checkpoints/
+*-checkpoint.ipynb
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Large data files (kept in Google Drive — see README.md)
+*.csv
+data/
+!data/.gitkeep
+
+# Heavy generated assets inside Comments/ (kept locally only)
+Comments/OB-stars/
+Comments/Feature_importance/
+Comments/Fainter_stars/
+
+# Editor
+.vscode/
+.idea/

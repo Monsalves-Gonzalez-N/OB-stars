@@ -1,133 +1,190 @@
-# Reusable templates
+# Reusable notebooks
 
-Plantillas genéricas para problemas recurrentes. Cada notebook se usa editando **únicamente** la celda `CONFIG`.
+Code templates extracted from the analysis pipeline of:
 
-| Notebook | Para qué |
+> **Astrophotometric search for massive stars in the Milky Way.**
+> **Confronting Random Forest predictions with available spectroscopy.**
+> N. Monsalves, A. Bayo, M. Jaque Arancibia, J. Bodensteiner, A. G. Caneppa, P. Sánchez-Sáez, R. Angeloni (2025).
+> [arXiv:2508.21573](https://arxiv.org/abs/2508.21573)
+
+The paper identifies OB massive star candidates in the Milky Way by training a Balanced Random Forest on Gaia DR3 photometry (G, G_BP, G_RP, 2MASS JHKs, parallax) cross-matched with the Skiff spectral-type compilation, and then validates predictions spectroscopically against LAMOST DR10 spectra and high-resolution standards (HERMES/FEROS/IACOB). The three notebooks here cover the three technical pieces that required the most adaptation and are likely to be useful in other contexts.
+
+Each notebook runs end-to-end by editing **only the `CONFIG` cell** (section 1). Section 0 in each notebook contains a ready-to-run quick-start example using the files in `example_data/`.
+
+| Notebook | Used in paper for | Conda env |
+|---|---|---|
+| `brf_classifier_template.ipynb` | Training the BRF classifier + hyperparameter search + feature importance with CV uncertainty | `RF` |
+| `spectral_line_fitting.ipynb` | Automatic spectral typing of LAMOST candidates (Hβ, Hγ, He I 4471, Mg II 4481, He II 4686…) | `standards` |
+| `spectral_resolution_degrade.ipynb` | Degrading HERMES/FEROS high-resolution standards (R ≈ 85 000) to LAMOST resolution (R ≈ 1300) for consistent comparison | `standards` |
+
+---
+
+## Quick start
+
+```bash
+git clone https://github.com/<user>/OB-stars
+cd OB-stars/reusable
+
+# BRF template (~30 s on 200 rows)
+conda activate RF
+jupyter notebook brf_classifier_template.ipynb
+# → run section 0, then run all
+
+# Spectral notebooks
+conda activate standards
+jupyter notebook spectral_line_fitting.ipynb
+jupyter notebook spectral_resolution_degrade.ipynb
+```
+
+All three example datasets are included in `example_data/` (6.6 MB total):
+
+| File | Description |
 |---|---|
-| `brf_classifier_template.ipynb` | Clasificación con Balanced Random Forest (grid search + CV con feature importance por fold). |
-| `spectral_line_fitting.ipynb` | Detección + ajuste Gaussiano (single / blended / core-emission) + EW de líneas espectrales. |
-| `spectral_resolution_degrade.ipynb` | Degradar espectros de alta a baja resolución + igualar ruido a un RMS objetivo. |
+| `brf_sample_200.csv` | 200-row subsample of the paper training set (O/B/A labels, 7 Gaia+2MASS features) |
+| `spec-56573-KP185031N425443V01_sp08-241.fits` | LAMOST DR10 spectrum (R ≈ 1300, SNR ≈ 143) used to demonstrate line fitting |
+| `00374442_melchiors_spectrum_coadded.fits` | HERMES coadded spectrum from the MELCHIORS library (R ≈ 85 000) used to demonstrate resolution degradation |
+
+To use your own data, skip section 0 (or restart the kernel) and fill in `CONFIG` directly.
 
 ---
 
 ## `brf_classifier_template.ipynb`
 
-Pipeline completo de Balanced Random Forest a partir de cualquier tabla con clasificación.
+### Context in the paper
 
-**Para usarlo:** abre el notebook, edita **únicamente** la celda `CONFIG` (sección 1) y ejecuta todo de arriba a abajo.
+The paper trains a `BalancedRandomForestClassifier` on ~34 000 stars with reliable MK spectral types from the Skiff (2014) compilation cross-matched with Gaia DR3. The classifier distinguishes OB massive stars from A/FGK stars using 7 photometric + astrometric features. Hyperparameters were tuned with `GridSearchCV` using `index_balanced_accuracy(geometric_mean_score)` as the scoring metric — robust for the severe class imbalance between massive (rare) and non-massive stars. The CV uncertainty on feature importance is used in the paper to argue which photometric features drive the separation.
 
-### Qué tienes que editar
+### What the template does
+
+1. Loads any CSV/parquet table with a classification label.
+2. Grid search over `n_estimators`, `max_features`, `max_depth`, `sampling_strategy` with `StratifiedKFold` and IBA-Gmean scoring.
+3. Repeated CV with `StratifiedShuffleSplit(20)` that saves per-fold:
+   - precision / recall / F1 per class
+   - confusion matrix
+   - **feature importance + std across trees within each fold** → gives a distribution of importances across folds
+4. Summary plots: confusion matrix mean ± std (PDF) and feature importance mean ± std bar chart (PDF).
+5. Final model trained on 80 % of data, saved with `joblib`. Predictions CSV with `prob_<class>` columns.
+
+Supports binary and multiclass classification automatically. For binary with a custom threshold use `'binary_threshold': 0.6` in `CONFIG`.
+
+### Edit only this
 
 ```python
 CONFIG = {
-    'data_path':    'path/to/your_table.csv',  # CSV o parquet
-    'target_col':   'label',                   # columna con la clase
-    'feature_cols': None,                      # lista de features; None = todas las numéricas
+    'data_path':    'path/to/your_table.csv',  # CSV or parquet
+    'target_col':   'label',                   # column with the class
+    'feature_cols': None,                      # list of features; None = all numeric columns
     'output_dir':   'results_run1',
     # ...
 }
 ```
 
-### Qué hace
+### Output files
 
-1. Carga la tabla y descarta filas con NaN o valores inválidos (`-999`, `999`, configurables).
-2. Grid search sobre `n_estimators`, `max_features`, `max_depth`, `sampling_strategy` con `StratifiedKFold(5)` y métrica `index_balanced_accuracy(geometric_mean_score)`.
-3. CV repetida con `StratifiedShuffleSplit(20)` que en **cada fold** guarda:
-   - precision/recall/F1 por clase
-   - matriz de confusión
-   - **feature importance del estimador completo** + std entre árboles
-4. Resúmenes: matriz de confusión media ± std (PDF) y feature importance media ± std (CSV + PDF).
-5. Modelo final entrenado sobre 80% y guardado con `joblib`. Predicciones sobre toda la tabla (CSV con `prob_<clase>` por clase y columna `split`).
-
-Soporta clasificación **binaria y multiclase** automáticamente. Para binaria con umbral custom, usa `'binary_threshold': 0.6` (etc.) en `CONFIG`.
-
-### Archivos generados en `output_dir/`
-
-| Archivo | Contenido |
+| File | Content |
 |---|---|
-| `best_params.csv` | Mejores hiperparámetros del grid search |
-| `gridsearch_full_results.csv` | Resultados completos del grid search |
-| `cv_metrics_per_fold.csv` | precision/recall/F1 por fold y por clase |
-| `cv_metrics_summary.csv` | Media ± std de métricas por clase |
-| `cv_feature_importance_per_fold.csv` | Feature importance por fold (una fila por feature × fold) |
-| `cv_feature_importance_summary.csv` | Media ± std de importancia por feature |
-| `confusion_matrix.pdf` | Matriz de confusión CV (media ± std) |
-| `feature_importance.pdf` | Bar plot top-30 features |
-| `model.joblib` | Modelo final entrenado |
-| `predictions.csv` | Tabla original + columnas `split`, `prob_<clase>`, `predicted` |
+| `best_params.csv` | Best hyperparameters from grid search |
+| `gridsearch_full_results.csv` | Full grid search results |
+| `cv_metrics_per_fold.csv` | precision/recall/F1 per fold per class |
+| `cv_metrics_summary.csv` | Mean ± std of metrics per class |
+| `cv_feature_importance_per_fold.csv` | Feature importance per fold (one row per feature × fold) |
+| `cv_feature_importance_summary.csv` | Mean ± std of importance per feature |
+| `confusion_matrix.pdf` | CV confusion matrix (mean ± std) |
+| `feature_importance.pdf` | Top-30 feature importance bar chart |
+| `model.joblib` | Final trained model |
+| `predictions.csv` | Input table + `split`, `prob_<class>`, `predicted` columns |
 
-### Dependencias
+### Dependencies
 
 ```
 pandas numpy scikit-learn imbalanced-learn joblib matplotlib seaborn ray
 ```
 
-`ray` es opcional (paraleliza la CV); para desactivarlo pon `'use_ray': False` en `CONFIG`.
+`ray` is optional (parallelizes the CV loops); disable with `'use_ray': False` in `CONFIG`.
 
 ---
 
 ## `spectral_line_fitting.ipynb`
 
-Adaptado de `notebooks/4_LAMOST.ipynb`. Para cada línea declarada en `CONFIG['lines']`:
+### Context in the paper
 
-1. Refina el continuo local con dos pasos sigma-clipping sobre las ventanas `blue_cont` + `red_cont`.
-2. Detecta absorción, emisión o no-detección comparando con `detection_threshold × σ` del continuo.
-3. Ajusta tres modelos: **single Gaussian**, **dos Gaussianas blendeadas** (si declaraste `companion`) y **core emission** (absorción + emisión central). Elige por BIC.
-4. Calcula EW por integración Newton–Cotes sobre `[λ₀ ± 4σ]`.
+LAMOST candidates predicted as OB by the BRF were validated by measuring equivalent widths of temperature-sensitive lines: Hβ (4861 Å), Hγ (4340 Å), He I (4471 Å), Mg II (4481 Å), He II (4686 Å). The presence/absence and depth of these lines constrains the spectral type independently of photometry. The Mg II 4481 / He I 4471 ratio is particularly sensitive to temperature near B2–B3. The pipeline handles blended He I + Mg II automatically via a two-Gaussian model selected by BIC.
 
-### CONFIG mínimo
+### What the template does
+
+For each line declared in `CONFIG['lines']`:
+
+1. Refines the local continuum with two sigma-clipping passes over the `blue_cont` + `red_cont` windows.
+2. Detects absorption, emission, or non-detection by comparing against `detection_threshold × σ` of the continuum.
+3. Fits three models: **single Gaussian**, **blended (two Gaussians)** if a `companion` line is declared, and **core emission** (absorption + central emission). Selects by BIC.
+4. Computes EW by Newton–Cotes integration over `[λ₀ ± 4σ]`.
+
+### Minimum CONFIG
 
 ```python
-'spectrum_path': 'mi_espectro.fits',
-'reader':        'lamost',       # o 'generic_fits', 'csv', o tu propio reader
-'R':             1300,
-'lines': [
-    {'name': 'HeI 4471', 'lambda': 4471,
-     'blue_cont': [4445, 4465], 'red_cont': [4490, 4510],
-     'line_window': [4465, 4490], 'companion': 4481},
-],
+CONFIG = {
+    'spectrum_path':  'my_spectrum.fits',
+    'reader':         'lamost',       # 'lamost' | 'generic_fits' | 'csv'
+    'R':              1300,
+    'lines': [
+        {'name': 'HeI 4471', 'lambda': 4471,
+         'blue_cont': [4445, 4465], 'red_cont': [4490, 4510],
+         'line_window': [4465, 4490], 'companion': 4481},
+    ],
+}
 ```
 
-### Salida
+### Output
 
-- `line_measurements.csv` — una fila por línea con `detection`, `model`, `EW`, `EW2`, `lambda_fit`, `sigma_fit`, `bic`, `snr`.
-- Un PDF por línea con detección + ajuste.
+- `line_measurements.csv` — one row per line: `detection`, `model`, `EW`, `EW2`, `lambda_fit`, `sigma_fit`, `bic`, `snr`.
+- One PDF per line with continuum fit + Gaussian model overlaid.
 
-### Para añadir tu reader
+### Adding your own reader
 
-Define una función `(path) -> (wave_AA, flux, ivar_or_None)` y agrégala al diccionario `READERS` en la celda 3.
+Define a function `(path) -> (wave_AA, flux, ivar_or_None)` and add it to the `READERS` dict in cell 3. If you don't have `ivar`, return `None` and the code uses `ones_like(flux)`.
+
+### Dependencies
+
+```
+numpy pandas scipy astropy matplotlib scikit-learn
+```
 
 ---
 
 ## `spectral_resolution_degrade.ipynb`
 
-Adaptado de `notebooks/4_clasificar_standards.ipynb`. Convierte un espectro de alta resolución (`R_in`) a una resolución más baja (`R_out`):
+### Context in the paper
 
-1. **Convolución Gaussiana** con σ calculado para igualar el FWHM al objetivo. Dos modos:
-   - `'fwhm_out_only'` — aproximación del notebook original, válida cuando `R_in ≫ R_out`.
-   - `'deconv'` — kernel exacto: `FWHM_kernel² = FWHM_out² − FWHM_in²`.
-2. **Re-muestreo conservando flujo** (`specutils.FluxConservingResampler`) a una grilla lineal o log-uniforme configurable.
-3. **Inyección de ruido opcional** hasta llegar a un `target_rms` (e.g. el RMS típico de tu instrumento de baja resolución).
+The spectral standards used for validation (HERMES, FEROS, IACOB) have resolutions between R ≈ 25 000 and 85 000. To build a consistent comparison sample at LAMOST resolution (R ≈ 1300) — and to simulate the noise level of the faintest LAMOST targets — these spectra were convolved to R ≈ 1300 and resampled to the LAMOST wavelength grid. The MELCHIORS library (Royer et al. 2024) provided 163 coadded HERMES spectra that were processed this way.
 
-### CONFIG mínimo
+### What the template does
+
+1. **Gaussian convolution** with σ calculated to match the target FWHM. Two modes:
+   - `'fwhm_out_only'` — approximation valid when R_in ≫ R_out: FWHM_kernel ≈ λ/R_out.
+   - `'deconv'` — exact kernel: FWHM_kernel² = FWHM_out² − FWHM_in².
+2. **Flux-conserving resampling** (`specutils.FluxConservingResampler`) to a configurable linear or log-uniform grid.
+3. **Optional noise injection** to reach a target RMS (e.g. the typical continuum RMS of your low-resolution instrument).
+
+### Minimum CONFIG
 
 ```python
-'spectrum_path': 'mi_espectro_alta_resol.fits',
-'reader':        'iacob',     # o 'feros', 'hermes', 'generic_fits', 'csv'
-'R_in':          85000,
-'R_out':         1300,
-'lambda_ref':    4471,
-'target_rms':    None,        # o un float si quieres simular ruido
+CONFIG = {
+    'spectrum_path': 'my_high_res_spectrum.fits',
+    'reader':        'iacob',     # 'iacob' | 'feros' | 'hermes' | 'melchior' | 'generic_fits' | 'csv'
+    'R_in':          85000,
+    'R_out':         1300,
+    'lambda_ref':    4471,        # Å — reference wavelength for FWHM calculation
+    'target_rms':    None,        # float to inject noise, None to skip
+}
 ```
 
-### Salida
+### Output
 
-- `<spectrum>_R<R_out>.csv` con `lambda`, `flux`, `continuo`.
-- `degrade_comparison.pdf` con espectro de entrada vs degradado.
+- `<spectrum_name>_R<R_out>.csv` — columns `lambda`, `flux`, `continuo`.
+- `degrade_comparison.pdf` — input vs degraded spectrum overplotted.
 
-### Dependencias adicionales
+### Dependencies
 
 ```
-specutils astropy
+numpy pandas astropy specutils matplotlib scikit-learn
 ```
-

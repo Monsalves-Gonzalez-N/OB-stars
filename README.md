@@ -15,13 +15,9 @@ The paper identifies OB massive star candidates in the Milky Way by training a B
 
 ```bash
 conda env create -f RF.yml          # BRF training notebooks
-conda activate RF
-
-# For spectral notebooks:
-# conda activate standards           # install specutils, astropy
+conda env create -f standards.yml   # spectral notebooks
+conda activate RF                   # or: conda activate standards
 ```
-
-Large data files are stored on Google Drive (links below). The `data/` directory is gitignored.
 
 ---
 
@@ -35,16 +31,6 @@ Large data files are stored on Google Drive (links below). The `data/` directory
 | `4_clasificar_standards.ipynb` | Degrade high-resolution standards to LAMOST resolution; spectral classification pipeline |
 | `4_LAMOST.ipynb` | Automatic spectral typing of LAMOST candidates (line detection + Gaussian fitting) |
 | `5_Comparation_other_works.ipynb` | Compare predictions against literature catalogues |
-
-### Data files (Google Drive)
-
-| File | Link |
-|---|---|
-| `OBADR3_2arcsecSkiff.csv` — Gaia DR3 × Skiff crossmatch | [Drive](https://drive.google.com/file/d/1Vu9lyB-xSGzsQLR1f1jtC5gyHDY9Lttv/view?usp=drive_link) |
-| `OBADR3.csv` — Gaia DR3 OBA sample | [Drive](https://drive.google.com/file/d/1etbSm_15a_nWZJkP5XPdzrgGVC7C4bFe/view?usp=drive_link) |
-| `SKIFF.csv` — full Skiff database | [Drive](https://drive.google.com/file/d/116K_U1-djnHWbtKFWw15YSTZcclVg2NC/view?usp=drive_link) |
-| `skiff_2arcsec_OBAGDR3_prep_V2.csv` — preprocessed training table | [Drive](https://drive.google.com/file/d/1fDT3Fw0Rg3FzksvCyzD5OvUg2IoRXr2U/view?usp=drive_link) |
-| BRF results (G mag) | [Drive](https://drive.google.com/drive/folders/1PwqXYQs5sDm5UYA9OAtzLAY12jSaDm_8?usp=drive_link) |
 
 ---
 

@@ -16,8 +16,17 @@ Thumbs.db
 
 # Large data files (kept in Google Drive — see README.md)
 *.csv
+!reusable/example_data/*.csv
 data/
 !data/.gitkeep
+
+# Reusable template outputs (generated locally when running the examples)
+reusable/example_brf_results/
+reusable/example_line_fits_lamost/
+reusable/example_degrade_melchior/
+reusable/results_run1/
+reusable/line_fit_results/
+reusable/degraded_spectra/
 
 # Heavy generated assets inside Comments/ (kept locally only)
 Comments/OB-stars/
